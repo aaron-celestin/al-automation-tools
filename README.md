@@ -38,7 +38,7 @@ comments, no other command line arguments can be provided else they will overrid
 switches defined in the comments are strictly optional.
 
 
-##FOR WINDOWS VMs IN DATACENTER DEPLOYMENTS
+## FOR WINDOWS VMs IN DATACENTER DEPLOYMENTS
 The Windows PowerShell will download, install, and configure the agent before attempting to start the agent service. It must be run with elevated privileges to
 install the MSI file and start Windows services. The script cannot yet be run with switches or arguments as of version 1.0.1. The only way to configure the agent
 installation for now is to manually modify the script before deploying it. Uncomment the lines at the top to change configurations such as a customer agent URL,

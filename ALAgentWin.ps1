@@ -4,7 +4,7 @@ Set-ExecutionPolicy Bypass
 #####################################################################################################################
 # PASTE YOUR REGISTRATION KEY HERE (between the quotes) OR THE AGENTS INSTALLED WILL NOT CLAIM                      #
 #                                                                                                                   #                                                                                       
-                $REG_KEY = "c7249e7055390f19f39e79818821a12faeb58ab404d070e83e"#"<YOUR REGISTRATION KEY HERE>"                                                           #
+                $REG_KEY = "<YOUR REGISTRATION KEY HERE>"                                                           #
 #                                                                                                                   #
 #####################################################################################################################
 

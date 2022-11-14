@@ -1,5 +1,5 @@
 # Alert Logic Agent Installer for Windows v1.0.4
-# Set-ExecutionPolicy Bypass
+
 Set-ExecutionPolicy Bypass -Scope Process -Force;
 
 

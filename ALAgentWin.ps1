@@ -1,5 +1,7 @@
-# Alert Logic Agent Installer for Windows v1.0.1
-Set-ExecutionPolicy Bypass
+# Alert Logic Agent Installer for Windows v1.0.4
+# Set-ExecutionPolicy Bypass
+Set-ExecutionPolicy Bypass -Scope Process -Force;
+
 
 #####################################################################################################################
 # PASTE YOUR REGISTRATION KEY HERE (between the quotes) OR THE AGENTS INSTALLED WILL NOT CLAIM                      #
@@ -15,18 +17,19 @@ $REG_KEY_MIN = 50
 $REG_KEY_MAX = 54
 
 
+
 #Custom Variables
 # Path to agent installer, for example if the msi has been downloaded to the local machine already. This will bypass the downloading of the msi.
-#$script:custom_msi = " <custom path> \al-agent-LATEST.msi
+#$script:msi_path =  "< MSI file path >"
 
 # if the agent will not be installed to the default installation path, set it here.
-#$script:cust_path = "<custom path>"
+#$script:inst_path = "< install file path >"
 
 # Appliance URL. By default, the agents forwards logs direct;y to Alert Logic's datacnter at "vaporator.alertlogic.com" over port 443. In some cases where the agent 
 # is in a private subnet with no direct outside internet access, logs can be forwarded through an IDS appliance. Set the IDS appliance URL or IP here that will act as
 # a gateway here. 
-#$app_hostname = <IP or hostname of IDS appliance>
-#[int32]$app_port = <port of IDS appliance>
+#$script:app_hostname = "< IP or hostname of IDS appliance >"
+#$script:app_port = "< port of IDS appliance >"
 
 # If the agent will be behind a proxy, set this to true and the agent will attempt to use the proxy settings from WinHTTP's built-in settings.
 #$proxy = "true"
@@ -38,17 +41,12 @@ $REG_KEY_MAX = 54
 # If you want to avoid the system reboot, and consequently pause the installation process until you manually reboot, uncomment the following line to suppress the reboot. 
 #$supress_reboot = "true"
 
-#ChangeLOG
-#v0.8.4     original release
-#v0.8.5     added ability to set custom appliance URL, added ability to suppress reboot
-#v0.9       added proxy support, added ability to set custom msi path, added ability to set custom install path
-#v0.9.1     added ability to set custom log file path
-#v1.0.1     refactored applianceEgress and downloadAgent functions, added more verbose messages, added verbose mode check function and added UTF-8 encoding for log file output 
 
 function downloadAgent 
 {    
-    write-verbose "Downloading agent from $agent_url"
+    
     $agent_url = "https://scc.alertlogic.net/software/al_agent-LATEST.msi"
+    write-verbose "Downloading agent from $agent_url"
     try 
     {
         $adl_hash = @{
@@ -71,10 +69,10 @@ function downloadAgent
 }
 
 
-function startAgentService ([string]$agent_svc_name)
+function startAgentService 
 {
     $agent_svc_name = "al_agent"
-    Write-Host "Starting agent service..."
+    Write-verbose "Starting agent service..."
     try
     {
         start-service -name $agent_svc_name
@@ -93,10 +91,10 @@ function startAgentService ([string]$agent_svc_name)
 }
 
 
-function checkOptionalMakePaths  ([string]$msi_path, [string]$inst_path)
+function checkOptionalMakePaths
 {    # Check if msi_path is valid path set by user, if not, set to default
-    Write-verbose "Checking if non-default install and file paths are set."
-    if (Test-Path $msi_path -ErrorAction Ignore) 
+    Write-Verbose "Checking if non-default install and MSI file paths are set."
+    if (Test-Path $msi_path -ErrorAction "Ignore") 
     {
         $script:p_msi = $msi_path
         Write-Verbose "MSI path set by user, using path: $msi_path" 
@@ -109,7 +107,7 @@ function checkOptionalMakePaths  ([string]$msi_path, [string]$inst_path)
     }
             
     # Check if inst_path is valid path set by user, if not, set to default
-    if (Test-Path $inst_path -ErrorAction Ignore) 
+    if (Test-Path $inst_path -ErrorAction "Ignore") 
     {
         $script:p_inst = $inst_path
         $script:cust_inst = "true"
@@ -117,35 +115,39 @@ function checkOptionalMakePaths  ([string]$msi_path, [string]$inst_path)
     }   
     else
     {
-        Write-Verbose "Install path not set by user or does not exist, using default %systemroot% path." 
+        Write-Verbose "Install path not set by user or does not exist, using default ${env:ProgramFiles(x86)} path." 
     }
 }
    
 
-function checkLogEgressAppliance ([string]$a_hostname,[int32]$a_port)
+function checkLogEgressAppliance
 {
     $script:opt_app = ""
     $script:opt_port = 0
-    write-verbose "Checking Log Egress Appliance is set."
+    $script:app_hostname = $app_hostname -as [string]
+    $script:app_port = $app_port -as [int]
+    write-verbose "Checking if Log Egress through Appliance is set."
     try
     {
+        write-verbose "Egress appliance args found: $script:app_hostname : $script:app_port"
+        write-verbose "Initializing connection to appliance, please wait."
         $tnc_hash = @{
-            ComputerName = $a_hostname
-            Port = $a_port
-            ErrorAction = SilentlyContinue
+            ComputerName = $script:app_hostname
+            Port = $script:app_port
+            ErrorAction = "SilentlyContinue"
         }
+        write-verbose "IDS Appliance connection and function testing in progress. Target: $script:app_hostname"
         $appObj = Test-NetConnection @tnc_hash
-        write-verbose "Custom Appliance Object Function Test: $appObj"
         if ($appObj.TcpTestSucceeded)
         {
-            $script:opt_app = $a_hostname
-            $script:opt_port = $a_port
+            $script:opt_app = $script:app_hostname
+            $script:opt_port = $script:app_port
             $script:cust_app = "true" 
-            Write-verbose "IDS Appliance Egress target $a_hostname is up."
+            Write-Verbose "IDS Appliance connection target test successful. $app_hostname is up and reachable."
         }
         else
         {
-            Write-verbose "IDS Appliance Egress target $a_hostname is down or not set."
+            Write-verbose "IDS Appliance Egress target $app_hostname is down or not set."
             Write-verbose "Agent logs will be sent to vaporator.alertlogic.com. This is the default behavior"
         }
     }
@@ -179,6 +181,7 @@ function toggleVerboseMode
     }
 }   
 
+
 function checkVerbosePreference
 {
     Write-Host "Checking Script and Global verbose mode preferences." 
@@ -201,6 +204,9 @@ function checkVerbosePreference
 
 function installAgent ([string]$key)
 {
+    downloadAgent
+    checkOptionalMakePaths
+    checkLogEgressAppliance
     if (($key -eq "<YOUR REGISTRATION KEY HERE>") -OR ($key-eq "")) 
         {
             Write-Host "Please enter your registration key in the script before running it." 
@@ -235,7 +241,7 @@ function installAgent ([string]$key)
         if ($script:cust_app -eq "true") 
         {
             $script:install_command += " -sensor_host=$script:opt_app -sensor_port=$script:opt_port"
-            Write-Verbose "Appliance egress set $script:opt_app:$script:opt_port"
+            Write-Verbose "Appliance egress was set: $script:opt_app : $script:opt_port"
         }
         if ($proxy -eq "true")
         {
@@ -269,7 +275,7 @@ function installAgent ([string]$key)
 if ($verb_mode -eq "true")
 {
     toggleVerboseMode 
-    installAgent($REG_KEY) -verbose *>&1 | Tee-Object -append -encoding utf8 -FilePath $script:logFilePath
+    installAgent($REG_KEY) -verbose *>&1 | Tee-Object -append -encoding "utf8" -FilePath $script:logFilePath
     toggleVerboseMode
     checkVerbosePreference
 }
@@ -279,5 +285,6 @@ else
     installAgent($REG_KEY)
     
 }
+
 
 # END OF SCRIPT

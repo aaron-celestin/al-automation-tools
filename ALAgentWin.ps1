@@ -13,8 +13,7 @@ Set-ExecutionPolicy Bypass
 #Static variables. DO NOT ALTER THESE UNLESS DIRECTED TO DO SO BY ALERT LOGIC STAFF
 $REG_KEY_MIN = 50
 $REG_KEY_MAX = 54
-$script:logfilepath = "$env:USERPROFILE\Downloads\AlertLogic\agent_install.log"
-$global:SAVED_VERB_PREF = $global:VerbosePreference
+
 
 #Custom Variables
 # Path to agent installer, for example if the msi has been downloaded to the local machine already. This will bypass the downloading of the msi.
@@ -156,29 +155,47 @@ function checkLogEgressAppliance ([string]$a_hostname,[int32]$a_port)
 
 function toggleVerboseMode
 { 
-    $global:VerbosePreference = "Continue"
-    Write-Verbose "Debug (Verbose) mode set by user."
-        
-    if (Test-Path $script:logFilePath) 
+    $script:logfilepath = "$env:USERPROFILE\Downloads\AlertLogic\agent_install.log"
+    $script:SAVED_GVB_PREF = $global:VerbosePreference  
+    if ($script:VerbosePreference -ne "Continue") #if anything but continue, set it to continue (verb mode on)
     {
-        Write-Verbose "Log file path is $script:logFilePath."
+        $script:VerbosePreference = "Continue"
+        Write-Verbose "Script level scope verbose mode was set to ON ($script:VerbosePreference)."
+        if (Test-Path $logFilePath) 
+        {
+            Write-Verbose "Log file path is $logFilePath."
+        }
+        else
+        {
+            New-Item -Path $logFilePath -ItemType File -Force #create file if it doesnt exist
+            Write-Verbose "Log file path $logFilePath created."
+        } 
     }
-    else
+    elseif ($script:VerbosePreference -eq "Continue") #or if set to continue, turn it off (toggle off)
     {
-        New-Item -Path $logFilePath -ItemType File -Force #create file if it doesnt exist
-        Write-Verbose "Log file path $script:logFilePath created."
-    } 
-}
+        $script:VerbosePreference = "SilentlyContinue"
+        Write-Verbose "Script level scope verbose mode was set to OFF ($script:VerbosePreference)."
+        Write-Verbose "Global level scope verbose mode is set to $global:VerbosePreference."
+    }
+}   
 
-
-function checkVerbose
+function checkVerbosePreference
 {
-    Write-Host "Checking for Verbose Mode. Mode currently set to $global:VerbosePreference"
-    Write-Verbose "WARNING! IF YOU ARE SEEING THIS MESSAGE, POWERSHELL IS STILL SET TO VERBOSE MODE. IT IS POSSIBLE VERBOSE MODE HAS FAILED TO REVERT."
-    Write-Verbose "If your Powershell installation is set to be verbose by default, please ignore this message. If not, please check this script and make" 
-    Write-Verbose "sure the last line is:  `$global:VerbosePreference = `$SAVED_VERB_PREF"
-    Write-Verbose "IF VERB MODE IS STILL ON, TRY MANUALLY SETTING THE VERBOSE MODE PREFERENCE VARIABLE TO 'SilentlyContinue' FROM THE COMMAND LINE:"
-    Write-Verbose "`$VerbosePreference = 'SilentlyContinue'"
+    Write-Host "Checking Script and Global verbose mode preferences." 
+    Write-Host "Script level pref was set to $script:VerbosePreference"
+    Write-Host "Global level pref was set to $global:VerbosePreference"
+    if ($global:VerbosePreference -ne $script:SAVED_GVB_PREF) 
+    {
+        Write-Host "WARNING! POWERSHELL'S VERBOSE MODE PREFS HAVE BEEN MODIFIED!"
+        Write-Host "VERBOSE MODE PREFERENCES FAILED TO REVERT TO THE DEFAULT." 
+        Write-Verbose "Check your verbose mode preferences by typing `$global:VerboseModePreference on the command line."
+        Write-Verbose "Try manually setting your VB Mode preference from the PowerShell command prompt:"
+        Write-Verbose "Example: `$VerbosePreference = 'SilentlyContinue'"
+    }
+    else 
+    {
+        Write-Host "Global verbose mode preferences were not modified."
+    }
 }
 
 
@@ -197,36 +214,40 @@ function installAgent ([string]$key)
     else
     {
         $script:install_command = "msiexec /i $script:p_msi -prov_key=$key"
-        Write-Verbose "Default install command: $script:install_command"
+        Write-Verbose "Default install command string $script:install_command"
         if ($cust_inst -eq "true")
         {
             $script:install_command += " -install_path=$script:p_inst"
-            Write-Verbose "Install path set by user, install command: $script:install_command"
+            Write-Verbose "Install path, $script:p_inst set by user"
         }
         if ($verb_mode -eq "true") 
         {
             $script:install_command += " /l*vx $script:logfilepath"
-            Write-Verbose "Debug (verbose) install command: $script:install_command"
+            Write-Verbose "Verbose mode enabled, logfile is $script:logfilepath"
         }
-        else {$script:install_command += $default_opts}
+        else 
+        {
+            $script:install_command += $default_opts
+            Write-Verbose "Default options $default_opts set."
+        }
     
 
         if ($script:cust_app -eq "true") 
         {
             $script:install_command += " -sensor_host=$script:opt_app -sensor_port=$script:opt_port"
-            Write-Verbose "Appliance egress added: $script:install_command"
+            Write-Verbose "Appliance egress set $script:opt_app:$script:opt_port"
         }
         if ($proxy -eq "true")
         {
             $script:install_command += " -use_proxy=1"
-            Write-Verbose "Proxy enabled: $script:install_command"
+            Write-Verbose "Proxy enabled."
         }
         if ($supress_reboot -eq "true")
         {
             $script:install_command += " -REBOOT=ReallySuppress"
-            Write-Verbose "Reboot supressed: $script:install_command"
+            Write-Verbose "Reboot prompt supressed."
         }
-        Write-Verbose "Final install command: $script:install_command"
+        Write-Verbose "Final install command string: $script:install_command"
         try
         {
             Invoke-Expression -command $script:install_command 
@@ -249,7 +270,8 @@ if ($verb_mode -eq "true")
 {
     toggleVerboseMode 
     installAgent($REG_KEY) -verbose *>&1 | Tee-Object -append -encoding utf8 -FilePath $script:logFilePath
-    
+    toggleVerboseMode
+    checkVerbosePreference
 }
 else 
 {
@@ -258,12 +280,4 @@ else
     
 }
 
-
-        
-if ($global:VerbosePreference -ne "SilentlyContinue")
-{
-    $global:VerbosePreference = $SAVED_VERB_PREF
-    Write-Host "Verbose mode reverted back to original preference."
-}
-checkVerbose
 # END OF SCRIPT

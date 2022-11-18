@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Alert Logic Agent Installer $a_version
 # Copyright Alert logic, Inc. 2022. All rights reserved.
 

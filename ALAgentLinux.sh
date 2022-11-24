@@ -1,7 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 # Alert Logic Agent Installer $a_version
 # Copyright Alert logic, Inc. 2022. All rights reserved.
-
 ##########################################################################################################
 # ENTER YOUR REGISTRATION KEY HERE. Your key can be found in the Alert Logic console.
 # In the console, click the hamburger menu. Click Configure > Deployments. Select the DataCenter deployment
@@ -14,29 +13,34 @@
 ##########################################################################################################
 
 function usage {
+    sn=$(echo "$0" | sed 's/..//')
     echo -e "
 --------------Alert Logic Agent Installer $a_version----------------
 
-Usage:" $0 "[-key <key>] | [-help]
+Usage: "$sn" [-key <key>] | [-help]
     
     -key <key>      The key to provision the agent with.
     -help           Display this help message.
    
-This script will check a Linux virtual machines init and pkg manager configurations and then install the appropriate Alert 
-Logic Agent. Cloud environments AWS and Azure do not require registration keys to provision to Alert Logics backend. Thus,
-this script is not neccessary for those environments. 
+This script will check Linux virtual machines' init and pkg manager configurations and then install the appropriate Alert 
+Logic Agent. It will also check for SELinux and semanage utilities to allow log traffic. If semanage (python utils) is not
+installed, this script will download and install policycoreutils which include semanage using the native software manager 
+(yum/apt/zypper). Then it will modify all necessary syslog config files for log forwarding, restart the rsyslog service,
+and finally will start/restart the Alert Logic agent service. 
 
-NOTE: In AWS, use SSM to deploy this script to target EC2 instances.
-NOTE: In Azure, use Azure Cloud Shell to deploy this script to the target instances.
+NOTE: In AWS, use SSM to deploy this script to target Linux EC2 VMs.
+NOTE: In Azure, use Azure Cloud Shell to deploy this script to the target Linux VMs.
 Refer to Alert Logic documentation for more information.
             
 For DataCenter deployments, a registration key must be used. There are two ways to supply the key:
     1. Paste the key directly into the script and uncomment the line by removing the #.
     2. Supply the key as an argument to the script. The key its the only argument the script accepts.
+    
+For cloud based virtual machines (AWS and Azure) no registration key is required.     
 
-Example: >" $0 "-key '1234567890abcdef1234567890aabcdef1234567890abcdef'
-Example: > source  "$0" -key '1234567890abcdef1234567890aabcdef1234567890abcdef'
-Example: > ./scriptname.sh -help
+Example: >" $sn "-key '1234567890abcdef1234567890aabcdef1234567890abcdef'
+Example: > source  "$sn" -key '1234567890abcdef1234567890aabcdef1234567890abcdef'
+Example: > ./"$sn" -help
 
 It is strongly advised that this installer be run with sudo privileges to ensure correct installation and configuration 
 of the agent.
@@ -64,7 +68,7 @@ rpm32="https://scc.alertlogic.net/software/al-agent-LATEST-1.i386.rpm"
 rpm64="https://scc.alertlogic.net/software/al-agent-LATEST-1.x86_64.rpm"
 rpmarm="https://scc.alertlogic.net/software/al-agent-LATEST-1.aarch64.rpm"
 
-a_version="0.9.0"
+a_version="1.0.0"
 
 # Check whether RPM or DEB is installed
 function get_pkg_mgr () {
@@ -149,7 +153,7 @@ function get_init_config () {
     elif [[ $(ps --noheaders -o comm 1) = "init" ]]; then
         init_type="init"
     else
-        echo -e "Unknown init configuration. Exiting."
+        echo "Unknown init configuration. Exiting."
         usage
         exit 1
     fi
@@ -164,83 +168,99 @@ function configure_agent () {
     fi
     if [[ -n "$proxy_ip" ]]; then
         sudo /etc/init.d/al-agent configure --proxy $proxy_ip
-        echo -e "Proxy IP set $proxy_ip"
+        echo "Proxy IP set $proxy_ip"
     
     elif [[ -n "$proxy_host" ]]; then
         sudo /etc/init.d/al-agent configure --proxy $proxy_host
-        echo -e "Proxy host set $proxy_host"
+        echo "Proxy host set $proxy_host"
     fi
 }
 
 # Configure SYSLOG Collection
 function make_syslog_config () {
-    if [[ -f "$syslogng_conf_file" ]]; then #check if given ngsyslog file exists
+    if [[ -f "$syslogng_conf_file" ]] && [[ $( tail -n 1 "$syslogng_conf_file") != "log { source(s_sys); destination(d_alertlogic); };" ]]; then 
         echo "destination d_alertlogic {tcp("localhost" port(1514));};" | sudo tee -a $syslogng_conf_file
         echo "log { source(s_sys); destination(d_alertlogic); };" | sudo tee -a $syslogng_conf_file
-        sudo systemctl restart syslog-ng
-    elif [[ -f "$syslog_conf_file" ]]; then #check if given rsyslog file exists
+        if [[ $( tail -n 1 "$syslogng_conf_file") =~ "log { source(s_sys); destination(d_alertlogic); };" ]]; then
+            sudo systemctl restart syslog-ng
+            echo "Agent rsyslogng config file $syslogng_conf_file was successfully modified."
+        fi    
+    elif [[ -f "$syslog_conf_file" ]] && [[ $( tail -n 1 "$syslog_conf_file") != "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then 
         echo "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" | sudo tee -a $syslog_conf_file
-        sudo systemctl restart rsyslog
-    else
-        echo "No syslog configuration file found. Please configure syslog manually."
-    fi
-}
-
-# Check SELinux Status using semanage
-# If the semanage command is not present in your system, install the policycoreutils-python package to obtain the semanage command. 
-function check_enforce () {
-    if [[ $(getenforce 2>&1) =~ "command not found" ]]; then
-        echo -e "SELinux is not enabled. Continuing with installation..."
-    elif [[ $(getenforce) ]]; then
-        if [[ -n "$(command -v semanage)" ]]; then 
-            make_enforce
-        else
-        { 
-            echo -e "The semanage pkg is not available. Installing policycoreutils python utils package..."
-            if [[ -n $(sudo zypper --version 2>&1) ]]; then
-                sudo apt install policycoreutils-python-utils -y
-            elif [[ -n $(sudo apt --version 2>&1) ]]; then    
-                sudo zypper install --no-confirm policycoreutils-python-utils
-            elif [[ -n $(sudo yum --version 2>&1) ]]; then
-                sudo yum install policycoreutils-python-utils -y
-            fi
-            make_enforce    
-        }
+        if [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
+            sudo systemctl restart rsyslog
+            echo "Agent rsyslog config file $syslog_conf_file was successfully modified."
         fi
-    fi 
-}
-
-
-function make_enforce () {    
-    if [[ $(getenforce) = "Permissive" ]]; then
-        sudo semanage port -a -t syslogd_port_t -p tcp 1514
-    elif [[ $(getenforce) = "Enforcing" ]]; then
-        sudo setenforce 0
-        sudo semanage port -a -t syslogd_port_t -p tcp 1514
-        sudo setenforce 1
+    elif [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
+        echo "rsyslog was already configured. No changes were made to $syslog_conf_file"
+    elif [[ $( tail -n 1 "$syslogng_conf_file") != "log { source(s_sys); destination(d_alertlogic); };" ]]; then
+        echo "rsyslogng was already configured. No changes were made to $syslogng_conf_file"
+    else    
+        echo "No syslog configuration file was found. Please configure rsyslog manually."
+    fi
+} 
+function check_enforce {
+    if [[ $(getenforce 2>&1) =~ "command not found" ]]; then
+        echo "SELinux is not enabled. Semanage utils will not be installed."
+    elif [[ $(getenforce 2>&1) =~ "Disabled" ]]; then
+        echo "SELinux is enabled but getenforce is disabled. Semanage utils will not be installed."
+    elif [[ $((sudo semanage port -a -t syslogd_port_t -p tcp 1514) 2>&1) =~ "ValueError" ]]; then
+        echo "SELinux is enabled and semanage is installed and syslogd tcp port 1514 has already been set"
+        echo "by semanage. Continuing syslog configuration script..."
+    elif [[ -n $(command -v semanage 2>&1) ]]; then
+            echo "SELinux is enabled but semanage is not available."
+            echo "Installing semanage with policycoreutils python utils package..."       
+        if [[ -n $(command -v apt 2>&1) ]]; then
+            echo "using apt to install policycoreutils..."
+            sudo apt install policycoreutils-python-utils -y
+        elif [[ -n $(command -v zypper 2>&1) ]]; then
+            echo "using zypper to install policycoreutils..."
+            sudo zypper install --no-confirm policycoreutils-python-utils
+        elif [[ -n $(command -v yum 2>&1) ]]; then
+            echo "using yum to install policycoreutils..."
+            sudo yum install policycoreutils-python-utils -y
+        fi
+        get_enforce
+    else
+       echo "SELinux is enabled but semanage status could not be determined. Contact your administrator"    
+       exit 1
     fi
 }
-
-
+function get_enforce {    
+    if [[ $(getenforce) = "Permissive" ]]; then
+        echo "getenforce reported Permissive SELinux configuration. Running semanage..."
+        sudo semanage port -a -t syslogd_port_t -p tcp 1514    
+    elif [[ $(getenforce) = "Enforcing" ]] && [[ -n $((command -v setenforce) 2>&1) ]]; then
+        echo "getenforce reported Enforcing SELinux configuration. Toggling setenforce and running semanage..."
+        setenforce 0
+        sudo semanage port -a -t syslogd_port_t -p tcp 1514
+        setenforce 1 
+    fi
+}
 # Install the agent and configure it
 function run_install {
     install_agent
     check_enforce
     configure_agent
     make_syslog_config
-    sudo /etc/init.d/al-agent start
-    if [[ -n "$(pgrep al-agent)" ]]; then
-        echo -e " Agent service started. Install complete. "
+    if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
+        sudo /etc/init.d/al-agent start
+        if [[ -n "$(pgrep al-agent)" ]]; then
+            echo "Agent service was started. Install complete."
+        fi    
+    elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
+        echo "Agent service already running. Restarting..."
+        sudo /etc/init.d/al-agent restart     
+        if [[ -n "$(pgrep al-agent)" ]]; then
+            echo "Agent service restarted. Install complete."
+        fi    
     else 
-    { 
-        echo -e " Agent installed but service failed to start. Please check your system init and try again. "
+        echo "Agent was installed but the service failed to start. Please check your system init and try again."
         exit 1
-    }
     fi
-}       
+}
 
-
-
+# Get command line args and Start script processing
 if [[ $1 = "-key" ]] || [[ $1 = "--key" ]] || [[ $1 = "-k" ]]; then
     if [[ -z "$2" ]]; then
         echo -e "Key switch (-k|--key) set but no registration key was provided. Exiting."

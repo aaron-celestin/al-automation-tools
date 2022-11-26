@@ -1,4 +1,10 @@
-sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
+#!/bin/bash 
+# Date: 2022-11-21
+# AWS Shell Script Wrapper for Alert Logic Agent Configurator     
+ sudo tee -a al_conf_gen.sh > /dev/null <<"EOT"
+    #!/bin/bash 
+    # Date: 2022-11-26
+    # SSM Agent Configurator v1.2
     # Packages will be linked but only downloaded when the agent is ready to be installed.
     deb32="https://scc.alertlogic.net/software/al-agent_LATEST_i386.deb"
     deb64="https://scc.alertlogic.net/software/al-agent_LATEST_amd64.deb"
@@ -7,7 +13,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
     rpm64="https://scc.alertlogic.net/software/al-agent-LATEST-1.x86_64.rpm"
     rpmarm="https://scc.alertlogic.net/software/al-agent-LATEST-1.aarch64.rpm"
     # Check whether package manager is RPM or DEB
-    function get_pkg_mgr () {
+function get_pkg_mgr () {
         pkg_mgr=""
         if [[ -f /usr/bin/dpkg ]]; then       
             pkg_mgr="dpkg"
@@ -25,7 +31,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         echo -e "Package manager is $pkg_mgr "
     }
     # Check CPU Architecture
-    function get_arch () {
+function get_arch () {
         thisarch=""
         arch=$(uname -i)
         echo -e " Detected architecture is $arch"
@@ -43,7 +49,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         echo -e "Architecture is $thisarch"
     }
     # Setup and install the agent
-    function install_agent () {
+function install_agent () {
         get_arch
         get_pkg_mgr
         if [[ $pkg_mgr = "dpkg" ]]; then
@@ -79,7 +85,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         fi        
     }
     # Get init configuration information
-    function get_init_config () {
+function get_init_config () {
         init_type=""
         if [[ $(ps --noheaders -o comm 1) = "systemd" ]]; then
             init_type="systemd"
@@ -93,7 +99,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         echo -e "Detected init type is $init_type "
     }
     # Configure the agent options
-    function configure_agent () {
+function configure_agent () {
         get_init_config
         if [[ -n "$REG_KEY" ]]; then
             sudo /etc/init.d/al-agent provision --key $REG_KEY
@@ -108,57 +114,33 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         fi
     }
     # Configure SYSLOG Collection
-    function make_syslog_config () {
-        if [[ -f "$syslogng_conf_file" ]] && [[ $( tail -n 1 "$syslogng_conf_file") != "log { source(s_sys); destination(d_alertlogic); };" ]]; then 
-            echo "destination d_alertlogic {tcp("localhost" port(1514));};" | sudo tee -a $syslogng_conf_file
-            echo "log { source(s_sys); destination(d_alertlogic); };" | sudo tee -a $syslogng_conf_file
-            if [[ $( tail -n 1 "$syslogng_conf_file") =~ "log { source(s_sys); destination(d_alertlogic); };" ]]; then
-                sudo systemctl restart syslog-ng
-                echo "Agent rsyslogng config file $syslogng_conf_file was successfully modified."
-            fi    
-        elif [[ -f "$syslog_conf_file" ]] && [[ $( tail -n 1 "$syslog_conf_file") != "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then 
-            echo "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" | sudo tee -a $syslog_conf_file
-            if [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
-                sudo systemctl restart rsyslog
-                echo "Agent rsyslog config file $syslog_conf_file was successfully modified."
-            fi
-        elif [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
-            echo "rsyslog was already configured. No changes were made to $syslog_conf_file"
-        elif [[ $( tail -n 1 "$syslogng_conf_file") != "log { source(s_sys); destination(d_alertlogic); };" ]]; then
-            echo "rsyslogng was already configured. No changes were made to $syslogng_conf_file"
-        else    
-            echo "No syslog configuration file was found. Please configure rsyslog manually."
+function make_syslog_config () {
+    syslogng_conf_file="/etc/syslog-ng/syslog-ng.conf"
+    syslog_conf_file="/etc/rsyslog.conf"
+    if [[ -f "$syslogng_conf_file" ]] && [[ -z $( cat "$syslogng_conf_file" | grep "log { source(s_sys); destination(d_alertlogic); };") ]]; then 
+        echo "destination d_alertlogic {tcp("localhost" port(1514));};" | sudo tee -a $syslogng_conf_file
+        echo "log { source(s_sys); destination(d_alertlogic); };" | sudo tee -a $syslogng_conf_file
+        if [[ $( tail -n 1 "$syslogng_conf_file") =~ "log { source(s_sys); destination(d_alertlogic); };" ]]; then
+            sudo systemctl restart syslog-ng
+            echo "Agent rsyslogng config file $syslogng_conf_file was successfully modified."
+        fi    
+    elif [[ -f "$syslog_conf_file" ]] && [[ -z $( cat "$syslog_conf_file" | grep "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat") ]]; then 
+        echo "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" | sudo tee -a $syslog_conf_file
+        if [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
+            sudo systemctl restart rsyslog
+            echo "Agent rsyslog config file $syslog_conf_file was successfully modified."
         fi
-    } 
-    function check_enforce {
-        if [[ $(getenforce 2>&1) =~ "command not found" ]]; then
-            echo "SELinux is not enabled. Semanage utils will not be installed."
-        elif [[ $(getenforce 2>&1) =~ "Disabled" ]]; then
-            echo "SELinux is enabled but getenforce is disabled. Semanage utils will not be installed."
-        elif [[ $((sudo semanage port -a -t syslogd_port_t -p tcp 1514) 2>&1) =~ "ValueError" ]]; then
-            echo "SELinux is enabled and semanage is installed and syslogd tcp port 1514 has already been set"
-            echo "by semanage. Continuing syslog configuration script..."
-        elif [[ -n $(command -v semanage 2>&1) ]]; then
-                echo "SELinux is enabled but semanage is not available."
-                echo "Installing semanage with policycoreutils python utils package..."       
-            if [[ -n $(command -v apt 2>&1) ]]; then
-                echo "using apt to install policycoreutils..."
-                sudo apt install policycoreutils-python-utils -y
-            elif [[ -n $(command -v zypper 2>&1) ]]; then
-                echo "using zypper to install policycoreutils..."
-                sudo zypper install --no-confirm policycoreutils-python-utils
-            elif [[ -n $(command -v yum 2>&1) ]]; then
-                echo "using yum to install policycoreutils..."
-                sudo yum install policycoreutils-python-utils -y
-            fi
-            get_enforce
-            return
-        else
-           echo "SELinux is enabled but semanage status could not be determined. Contact your administrator"    
-           exit 1
-        fi
-    }
-    function get_enforce {    
+    elif [[ -n $( cat "$syslog_conf_file" | grep "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat") ]]; then
+        echo "rsyslog was already configured. No changes were made to $syslog_conf_file"
+        return
+    elif [[ -n $( cat "$syslogng_conf_file" | grep "log { source(s_sys); destination(d_alertlogic); };") ]]; then
+        echo "rsyslogng was already configured. No changes were made to $syslogng_conf_file"
+        return
+    else    
+        echo "No syslog configuration file was found. Please configure rsyslog manually."
+    fi
+} 
+function get_enforce {    
         if [[ $(getenforce) = "Permissive" ]]; then
             echo "getenforce reported Permissive SELinux configuration. Running semanage..."
             sudo semanage port -a -t syslogd_port_t -p tcp 1514    
@@ -171,7 +153,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
         fi
     }
     # Install the agent and configure it
-    function run_install {
+function run_install {
     if [[ -f /etc/init.d/al-agent ]]; then
         echo "Looks like the agent is already installed on this host. Checking al-agent service status..."
         if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
@@ -215,5 +197,5 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
 }
 run_install
 EOT
-sudo chmod +x agent_configurator.sh
-./agent_configurator.sh 
+sudo chmod +x al_conf_gen.sh
+./al_conf_gen.sh

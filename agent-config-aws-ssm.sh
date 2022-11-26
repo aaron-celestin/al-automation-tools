@@ -152,6 +152,7 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
                 sudo yum install policycoreutils-python-utils -y
             fi
             get_enforce
+            return
         else
            echo "SELinux is enabled but semanage status could not be determined. Contact your administrator"    
            exit 1
@@ -171,32 +172,48 @@ sudo tee -a agent_configurator.sh > /dev/null <<"EOT"
     }
     # Install the agent and configure it
     function run_install {
-        if [[ -f /etc/init.d/al-agent ]]; then
-            echo "Looks like the agent is already installed on this host. Running config fuctions...\"",
-            check_enforce
-            make_syslog_config
-        else
-            install_agent
-            check_enforce
-            make_syslog_config
-        fi
-        if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
+    if [[ -f /etc/init.d/al-agent ]]; then
+        echo "Looks like the agent is already installed on this host. Checking al-agent service status..."
+        if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
+            echo "Agent service already running. Restarting..."
+            sudo /etc/init.d/al-agent restart
+            if [[ -n "$(pgrep al-agent)" ]]; then
+                echo "Agent service was restarted."
+            fi    
+        elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
+            echo "Agent service is not running. Attempting to start service..."    
+            sudo /etc/init.d/al-agent restart
+            if [[ -n "$(pgrep al-agent)" ]]; then
+                echo "Agent service was started."
+            fi
+        fi    
+        check_enforce
+        make_syslog_config
+        echo "Agent configuration was successful."
+        return
+    elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "command not found" ]] || [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "No such file or directory" ]]; then
+        install_agent
+        if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
+            if [[ -n "$(pgrep al-agent)" ]]; then
+                echo "Agent installation was completed."
+                return
+            fi    
+        elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
             sudo /etc/init.d/al-agent start
             if [[ -n "$(pgrep al-agent)" ]]; then
-                echo "Agent service was started. Install complete."
-            fi    
-        elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
-            echo "Agent service already running. Restarting..."
-            sudo /etc/init.d/al-agent restart     
-            if [[ -n "$(pgrep al-agent)" ]]; then
-                echo "Agent service restarted. Install complete."
-            fi    
-        else 
-            echo "Agent was installed but the service failed to start. Please check your system init and try again."
-            exit 1
+                echo "Agent installation was completed. Service was started."
+                return
+            fi
         fi
-    }
-    run_install
+        check_enforce
+        make_syslog_config
+        echo "Agent installation and configuration completed successfully."   
+    else 
+        echo "Agent was installed but the service failed to start. Please check your system init and try again."
+        exit 1
+    fi
+}
+run_install
 EOT
 sudo chmod +x agent_configurator.sh
 ./agent_configurator.sh 

@@ -9,12 +9,6 @@ Set-ExecutionPolicy Bypass -Scope Process -Force;
 # if the agent will not be installed to the default installation path, set it here.
 #$script:inst_path = "< install file path >"
 #--------------------------------------------
-# Appliance URL. By default, the agents forwards logs direct;y to Alert Logic's datacnter at "vaporator.alertlogic.com" over port 443. In some cases where the agent 
-# is in a private subnet with no direct outside internet access, logs can be forwarded through an IDS appliance. Set the IDS appliance URL or IP here that will act as
-# a gateway here. 
-#$script:app_hostname = "< IP or hostname of IDS appliance >"
-#$script:app_port = "< port of IDS appliance >"
-#--------------------------------------------
 # If the agent will be behind a proxy, set this to true and the agent will attempt to use the proxy settings from WinHTTP's built-in settings.
 #$proxy = "true"
 #--------------------------------------------
@@ -95,7 +89,6 @@ function checkOptionalMakePaths
         Write-Verbose "Install path not set by user or does not exist, using default ${env:ProgramFiles(x86)} path." 
     }
 }
-
 function toggleVerboseMode
 { 
     $script:logfilepath = "$env:USERPROFILE\Downloads\AlertLogic\agent_install.log"
@@ -143,9 +136,6 @@ function installAgent
 {
     downloadAgent
     checkOptionalMakePaths
-    #checkLogEgressAppliance
-  
-    
         $script:install_command = "msiexec /i $script:p_msi"
         Write-Verbose "Default install command string $script:install_command"
         if ($cust_inst -eq "true")
@@ -163,7 +153,6 @@ function installAgent
             $script:install_command += $default_opts
             Write-Verbose "Default options $default_opts set."
         }
-       
         if ($proxy -eq "true")
         {
             $script:install_command += " -use_proxy=1"
@@ -186,7 +175,6 @@ function installAgent
             Write-Host "Error: Unable to install MSI file. Please check the installation path and try again."
             exit
         }
-    
     startAgentService
 }
 #----------------------------START SCRIPT PROCESSING-------------------------------

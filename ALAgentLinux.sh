@@ -13,11 +13,11 @@
 ##########################################################################################################
 
 function usage {
-    sn=$(echo "$0" | sed 's/..//')
+    sn=${echo "$0" | sed 's/..//'}
     echo -e "
 --------------Alert Logic Agent Installer $a_version----------------
 
-Usage: "$sn" [-key <key>] | [-help]
+Usage: $sn [-key <key>] | [-help]
     
     -key <key>      The key to provision the agent with.
     -help           Display this help message.
@@ -38,14 +38,14 @@ For DataCenter deployments, a registration key must be used. There are two ways 
     
 For cloud based virtual machines (AWS and Azure) no registration key is required.     
 
-Example: >" $sn "-key '1234567890abcdef1234567890aabcdef1234567890abcdef'
+Example: > "$sn "-key '1234567890abcdef1234567890aabcdef1234567890abcdef'
 Example: > source  "$sn" -key '1234567890abcdef1234567890aabcdef1234567890abcdef'
-Example: > ./"$sn" -help
+Example: > ./$sn -help
 
 It is strongly advised that this installer be run with sudo privileges to ensure correct installation and configuration 
 of the agent.
 
-For more help, please contact Alert Logic Technical Support.                
+For help, contact Alert Logic Technical Support.                
 "   
 }
 #################################### OPTIONAL CONFIGURATION ##############################################
@@ -66,7 +66,7 @@ deb64arm="https://scc.alertlogic.net/software/al-agent_LATEST_arm64.deb"
 rpm32="https://scc.alertlogic.net/software/al-agent-LATEST-1.i386.rpm"
 rpm64="https://scc.alertlogic.net/software/al-agent-LATEST-1.x86_64.rpm"
 rpmarm="https://scc.alertlogic.net/software/al-agent-LATEST-1.aarch64.rpm"
-a_version="1.1.2"
+a_version="1.1.0"
 # Check whether RPM or DEB is installed
 function get_pkg_mgr () {
     pkg_mgr=""
@@ -169,87 +169,112 @@ function configure_agent () {
 }
 # Configure SYSLOG Collection
 function make_syslog_config () {
-    syslogng_conf_file="/etc/syslog-ng/syslog-ng.conf"
-    syslog_conf_file="/etc/rsyslog.conf"
-    if [[ -f "$syslogng_conf_file" ]] && [[ -z $(cat "$syslogng_conf_file" | grep "log { source(s_sys); destination(d_alertlogic); };") ]]; then 
-        echo "destination d_alertlogic {tcp("localhost" port(1514));};" | sudo tee -a $syslogng_conf_file
-        echo "log { source(s_sys); destination(d_alertlogic); };" | sudo tee -a $syslogng_conf_file
-        if [[ $( tail -n 1 "$syslogng_conf_file") =~ "log { source(s_sys); destination(d_alertlogic); };" ]]; then
+    syslogng="/etc/syslog-ng/syslog-ng.conf"
+    syslog="/etc/rsyslog.conf"
+    if [[ -f "$syslogng" ]] && [[ -z $( (grep -F "log { source(s_sys); destination(d_alertlogic); };" "$syslogng") 2>&1) ]]; then
+        echo "destination d_alertlogic {tcp("localhost" port(1514));};" | sudo tee -a $syslogng
+        echo "log { source(s_sys); destination(d_alertlogic); };" | sudo tee -a $syslogng
+        if [[ $( tail -n 1 "$syslogng") = "log { source(s_sys); destination(d_alertlogic); };" ]]; then
             sudo systemctl restart syslog-ng
-            echo "Agent rsyslogng config file $syslogng_conf_file was successfully modified."
-        fi    
-    elif [[ -f "$syslog_conf_file" ]] && [[ -z $(cat "$syslog_conf_file" | grep "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat") ]]; then 
-        echo "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" | sudo tee -a $syslog_conf_file
-        if [[ $( tail -n 1 "$syslog_conf_file") =~ "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
-            sudo systemctl restart rsyslog
-            echo "Agent rsyslog config file $syslog_conf_file was successfully modified."
+            echo "Agent rsyslogng config file $syslogng was successfully modified."
         fi
-    elif [[ -n $(cat "$syslog_conf_file" | grep "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat") ]]; then
-        echo "rsyslog was already configured. No changes were made to $syslog_conf_file"
+    elif [[ -f "$syslog" ]] && [[ -z $( (grep -F "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" "$syslog" ) 2>&1) ]]; then
+        echo "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" | sudo tee -a $syslog
+        if [[ $( tail -n 1 "$syslog") = "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" ]]; then
+            sudo systemctl restart rsyslog
+            echo "Agent rsyslog config file $syslog was successfully modified."
+        fi
+    elif [[ $(grep -F "*.* @@127.0.0.1:1514;RSYSLOG_FileFormat" "$syslog") ]]; then
+        echo "rsyslog was already configured. No changes were made to $syslog"
         return
-    elif [[ -n $(cat "$syslogng_conf_file" | grep "log { source(s_sys); destination(d_alertlogic); };") ]]; then
-        echo "rsyslogng was already configured. No changes were made to $syslogng_conf_file"
+    elif [[ $(grep -F "log { source(s_sys); destination(d_alertlogic); };" "$syslogng") ]]; then
+        echo "rsyslogng was already configured. No changes were made to $syslogng"
         return
-    else    
+    else
         echo "No syslog configuration file was found. Please configure rsyslog manually."
     fi
-} 
-function check_enforce {
-    if [[ $(getenforce 2>&1) =~ "command not found" ]]; then
+}
+# Check for SELinux and then for tools to modify config files, if not there, install the tools and then do the config
+function set_enforce () {
+    if [[ $( getenforce 2>&1) == "command not found" ]]; then
         echo "SELinux is not enabled. Semanage utils will not be installed."
         return
-    elif [[ $(getenforce 2>&1) =~ "Disabled" ]]; then
-        echo "SELinux is enabled but getenforce is disabled. Semanage utils will not be installed."
+    elif [[ $( getenforce 2>&1) == "Disabled" ]]; then
+        echo "SELinux is enabled but getenforce is disabled. Semanage utils do not need to be installed."
         return
-    elif [[ $((sudo semanage port -a -t syslogd_port_t -p tcp 1514) 2>&1) =~ "ValueError" ]]; then
-        echo "SELinux is enabled and semanage is installed but syslogd tcp port 1514 has already been set"
-        echo "by semanage. Continuing syslog configuration script..."
+    elif [[ $( getenforce 2>&1) == "Permissive" ]]; then  
+        echo "getenforce reported Permissive SELinux configuration."
+        check_enforce
         return
-    elif [[ -n $(command -v semanage 2>&1) ]]; then
-            echo "SELinux is enabled but semanage is not available."
-            echo "Installing semanage with policycoreutils python utils package..."       
-        if [[ -n $(command -v apt 2>&1) ]]; then
-            echo "using apt to install policycoreutils..."
-            sudo apt install policycoreutils-python-utils -y
-        elif [[ -n $(command -v zypper 2>&1) ]]; then
-            echo "using zypper to install policycoreutils..."
-            sudo zypper install --no-confirm policycoreutils-python-utils
-        elif [[ -n $(command -v yum 2>&1) ]]; then
-            echo "using yum to install policycoreutils..."
-            sudo yum install policycoreutils-python-utils -y
-        else
-            echo "semanage tool could not be installed, contact your system administrator."
-            exit 1    
-        fi
-        get_enforce
+    elif [[ $(getenforce 2>&1) == "Enforcing" ]]; then
+        echo "getenforce reported Enforcing SELinux configuration."
+        check_enforce
         return
     else
        echo "SELinux is enabled but semanage status could not be determined. Contact your administrator"    
        exit 1
     fi
 }
-function get_enforce {    
-    if [[ $(getenforce) = "Permissive" ]]; then
-        echo "getenforce reported Permissive SELinux configuration. Running semanage..."
-        sudo semanage port -a -t syslogd_port_t -p tcp 1514    
-    elif [[ $(getenforce) = "Enforcing" ]] && [[ -n $((command -v setenforce) 2>&1) ]]; then
-        echo "getenforce reported Enforcing SELinux configuration. Toggling setenforce and running semanage..."
-        setenforce 0
-        sudo semanage port -a -t syslogd_port_t -p tcp 1514
-        setenforce 1 
+#Check if semanage is available
+function check_enforce
+{
+    setport="sudo semanage port -a -t syslogd_port_t -p tcp 1514"
+    porterr="ValueError: Port tcp/1514 already defined"
+    echo "Checking for SELinux semanage utilities."
+    if [[ -n $(command -v semanage 2>/dev/null) ]]; then # if semanage is not zero (installed)
+        echo "semanage is installed, setting SElinux configuration..."
+        if [[ $( ($setport) 2>&1 ) == "$porterr" ]]; then
+            echo "SELinux is enabled and semanage is installed but syslogd tcp port 1514 has already been set"
+            echo "by semanage. Continuing syslog configuration script..."
+            return
+        elif [[ -n $($setport 2>&1) ]]; then # redirect any other errors to stdin
+            echo "SELinux is in Permissive mode but the log forwarding port could not be configured."
+            echo "$?"
+            echo "Please check your SELinux configuration and try again."
+            exit 1
+        else
+            "$setport"
+            return
+        fi
+    elif [[ -z $(command -v semanage 2>&1) ]]; then # semanage is zero (not installed)
+            echo "SELinux is enabled but semanage is not available."
+            echo "Installing semanage with policycoreutils python utils package..."
+            get_semanage
+            "$setport"
     fi
+}
+#Check software manager and install semanage with policycoreutils
+function get_semanage () 
+{                  
+    if [[ -n $(command -v apt 2>&1) ]]; then
+        echo "using apt to install policycoreutils..."
+        sudo apt install policycoreutils-python-utils -y
+        return
+    elif [[ -n $(command -v zypper 2>&1) ]]; then
+        echo "using zypper to install policycoreutils..."
+        sudo zypper install --no-confirm policycoreutils-python-utils
+        return
+    elif [[ -n $(command -v yum 2>&1) ]]; then
+        echo "using yum to install policycoreutils..."
+        sudo yum install policycoreutils-python-utils -y
+        return    
+    else
+        echo "semanage tool could not be installed, contact your system administrator."
+        exit 1    
+    fi
+    
 }
 # Install the agent and configure it
 function run_install {
     if [[ -f /etc/init.d/al-agent ]]; then
         echo "Looks like the agent is already installed on this host. Checking al-agent service status..."
-        if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
+        if [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
             echo "Agent service already running. Restarting..."
             sudo /etc/init.d/al-agent restart
             if [[ -n "$(pgrep al-agent)" ]]; then
                 echo "Agent service was restarted."
             fi    
-        elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
+        elif [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
             echo "Agent service is not running. Attempting to start service..."    
             sudo /etc/init.d/al-agent restart
             if [[ -n "$(pgrep al-agent)" ]]; then
@@ -260,14 +285,14 @@ function run_install {
         make_syslog_config
         echo "Agent configuration was successful."
         return
-    elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "command not found" ]] || [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "No such file or directory" ]]; then
+    elif [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "command not found" ]] || [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "No such file or directory" ]]; then
         install_agent
-        if [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
+        if [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is running" ]]; then
             if [[ -n "$(pgrep al-agent)" ]]; then
                 echo "Agent installation was completed."
                 return
             fi    
-        elif [[ $((sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
+        elif [[ $( (sudo /etc/init.d/al-agent status) 2>&1) =~ "al-agent is NOT running" ]]; then
             sudo /etc/init.d/al-agent start
             if [[ -n "$(pgrep al-agent)" ]]; then
                 echo "Agent installation was completed. Service was started."
@@ -305,7 +330,7 @@ elif [[ $# = 0 ]] && [[ -z "$REG_KEY" ]]; then
     echo "Proceeding without a registration key..."
     run_install
 else
-    echo "Invalid option(s): $@. Exiting."
+    echo "Invalid option(s): $#. Exiting."
     usage
     exit 1
 fi

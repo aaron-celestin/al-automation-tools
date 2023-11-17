@@ -1,50 +1,45 @@
 # Alert Logic Agent Installer for Windows v1.0.4
-Set-ExecutionPolicy Bypass -Scope Process -Force;
-#####################################################################################################################
-# PASTE YOUR REGISTRATION KEY HERE (between the quotes) OR THE AGENTS INSTALLED WILL NOT CLAIM                      #
-#                                                                                                                   #                                                                                       
-                $REG_KEY = "<YOUR REGISTRATION KEY HERE>"                                                           #
-#                                                                                                                   #
-#####################################################################################################################
-#-----------------STATIC VARIABLES-------------------
-#Static variables. DO NOT ALTER THESE UNLESS DIRECTED TO DO SO BY ALERT LOGIC STAFF
-$REG_KEY_MIN = 50
-$REG_KEY_MAX = 54
-#-----------------OPTIONS--------------------
+# Copyright Alert logic, Inc. 2022. All rights reserved.
+
+# NOTE: Set execution policy before running, something like:
+# Set-ExecutionPolicy unrestricted
+
+# Set Registraition Key here:
+$script:registration_key=""
+
+$script:p_msi = "$env:USERPROFILE\Downloads\AlertLogic\al-agent-LATEST.msi"
+$script:agent_url = "https://scc.alertlogic.net/software/al_agent-LATEST.msi"
+
+
+#Custom Variables
 # Path to agent installer, for example if the msi has been downloaded to the local machine already. This will bypass the downloading of the msi.
 #$script:msi_path =  "< MSI file path >"
-#--------------------------------------------
+
 # if the agent will not be installed to the default installation path, set it here.
 #$script:inst_path = "< install file path >"
-#--------------------------------------------
+
 # Appliance URL. By default, the agents forwards logs direct;y to Alert Logic's datacnter at "vaporator.alertlogic.com" over port 443. In some cases where the agent 
 # is in a private subnet with no direct outside internet access, logs can be forwarded through an IDS appliance. Set the IDS appliance URL or IP here that will act as
 # a gateway here. 
 #$script:app_hostname = "< IP or hostname of IDS appliance >"
 #$script:app_port = "< port of IDS appliance >"
-#--------------------------------------------
+
 # If the agent will be behind a proxy, set this to true and the agent will attempt to use the proxy settings from WinHTTP's built-in settings.
 #$proxy = "true"
-#--------------------------------------------
+
 # For debugging purposes, set this to true to see the output of the agent installer. Output will be written to the file "agent_install.log" in the same directory as the installer.
 #$verb_mode = "true"
-#--------------------------------------------
+
 # Your system may reboot to complete the installation. The system may reboot if you have previously installed the agent, if you are running a Windows Server 2019 variant, or other reasons.
 # If you want to avoid the system reboot, and consequently pause the installation process until you manually reboot, uncomment the following line to suppress the reboot. 
 #$supress_reboot = "true"
-#----------------------SCRIPT BODY----------------------
+
 function downloadAgent 
-{    
-    $agent_url = "https://scc.alertlogic.net/software/al_agent-LATEST.msi"
+{     
     write-verbose "Downloading agent from $agent_url"
-    try 
-    {
-        $adl_hash = @{
-            Uri = $agent_url
-            OutFile = $script:p_msi
-        }
-        Invoke-WebRequest @adl_hash # Download MSI and put it in file destination
-        Write-Verbose "Agent MSI downloaded successfully"
+    try {
+        Invoke-WebRequest -Uri $script:agent_url -OutFile $script:p_msi # Download MSI and put it in file destination
+        Write-Verbose "Agent MSI downloaded successfully"  
     }
     catch [System.Net.WebException],[System.IO.IOException] 
     {
@@ -57,15 +52,16 @@ function downloadAgent
         exit
     }
 }
+
+
 function startAgentService 
 {
-    $agent_svc_name = "al_agent"
+    $avn = 'al_agent'
     Write-verbose "Starting agent service..."
-    try
-    {
-        start-service -name $agent_svc_name
-        set-service -name $agent_svc_name -startupType automatic
-        $al_service = get-service -name $agent_svc_name
+    try {
+        sc start $avn
+        set-service -name $avn -startupType automatic
+        $al_service = get-service -name $avn
         if ($al_service.status -eq "running") {
             Write-Verbose "Agent Service Started Successfully" 
         }
@@ -77,6 +73,8 @@ function startAgentService
         Write-Host "Service Error: Unable to start AlertLogic service. Check user permissions and try atgain."
     }
 }
+
+
 function checkOptionalMakePaths
 {    # Check if msi_path is valid path set by user, if not, set to default
     Write-Verbose "Checking if non-default install and MSI file paths are set."
@@ -87,10 +85,10 @@ function checkOptionalMakePaths
     }   
     else
     {
-        $script:p_msi = "$env:USERPROFILE\Downloads\AlertLogic\al-agent-LATEST.msi"
         New-Item -Path $script:p_msi -ItemType File -Force #create file
         Write-Verbose "MSI path not set by user or folder does not exist, using default path: $script:p_msi" 
-    }       
+    }
+            
     # Check if inst_path is valid path set by user, if not, set to default
     if (Test-Path $inst_path -ErrorAction "Ignore") 
     {
@@ -103,6 +101,8 @@ function checkOptionalMakePaths
         Write-Verbose "Install path not set by user or does not exist, using default ${env:ProgramFiles(x86)} path." 
     }
 }
+   
+
 function checkLogEgressAppliance
 {
     $script:opt_app = ""
@@ -136,6 +136,8 @@ function checkLogEgressAppliance
     }
     catch {}
 }
+
+
 function toggleVerboseMode
 { 
     $script:logfilepath = "$env:USERPROFILE\Downloads\AlertLogic\agent_install.log"
@@ -161,6 +163,8 @@ function toggleVerboseMode
         Write-Verbose "Global level scope verbose mode is set to $global:VerbosePreference."
     }
 }   
+
+
 function checkVerbosePreference
 {
     Write-Host "Checking Script and Global verbose mode preferences." 
@@ -179,25 +183,18 @@ function checkVerbosePreference
         Write-Host "Global verbose mode preferences were not modified."
     }
 }
-function installAgent ([string]$key)
+
+
+function installAgent ()
 {
-    downloadAgent
     checkOptionalMakePaths
+    downloadAgent
     checkLogEgressAppliance
-    if (($key -eq "<YOUR REGISTRATION KEY HERE>") -OR ($key-eq "")) 
-        {
-            Write-Host "Please enter your registration key in the script before running it." 
-            exit
-        }
-    elseif (($REG_KEY.Length -lt $REG_KEY_MIN) -OR ($key.Length -gt $REG_KEY_MAX))
-        {
-            Write-Host "Your registration key is not valid. Please check it and try again." 
-            exit
-        } 
-    else
-    {
-        $script:install_command = "msiexec /i $script:p_msi -prov_key=$key"
-        Write-Verbose "Default install command string $script:install_command"
+
+        $script:install_command = "msiexec /i $script:p_msi"
+        Write-Verbose "Default install command string $script:install_command"       
+ 
+    
         if ($cust_inst -eq "true")
         {
             $script:install_command += " -install_path=$script:p_inst"
@@ -210,9 +207,11 @@ function installAgent ([string]$key)
         }
         else 
         {
-            $script:install_command += $default_opts
-            Write-Verbose "Default options $default_opts set."
+            $script:install_command += " /qn install_only=1"
+            Write-Verbose "Default quiet options set."
         }
+    
+
         if ($script:cust_app -eq "true") 
         {
             $script:install_command += " -sensor_host=$script:opt_app -sensor_port=$script:opt_port"
@@ -240,20 +239,26 @@ function installAgent ([string]$key)
             Write-Host "Error: Unable to install MSI file. Please check the installation path and try again."
             exit
         }
-    }
-    startAgentService
 }
-----------------------------START SCRIPT PROCESSING-------------------------------
+
+##############################################################################################################################
+### START SCRIPT PROCESSING ###
+
 if ($verb_mode -eq "true")
 {
     toggleVerboseMode 
-    installAgent($REG_KEY) -verbose *>&1 | Tee-Object -append -encoding "utf8" -FilePath $script:logFilePath
+    installAgent -verbose *>&1 | Tee-Object -append -encoding "utf8" -FilePath $script:logFilePath
+    start-sleep -Seconds 3
+    startAgentService
     toggleVerboseMode
     checkVerbosePreference
 }
 else 
 {
     Write-Host "Debug mode not set by user, using default quiet mode." 
-    installAgent($REG_KEY)  
+    installAgent
+    start-sleep -Seconds 3
+    startAgentService
 }
+
 # END OF SCRIPT
